@@ -24,19 +24,20 @@ class OrderController extends AbstractController
     {
         $data = json_decode($request->getContent(), true);
 
-        if (!isset($data['items']) || empty($data['items'])) {
-            return $this->json(['error' => 'Aucun produit envoyé'], 400);
+        if (!isset($data['items'], $data['transaction_id'])) {
+            return $this->json(['error' => 'Données manquantes'], 400);
         }
 
         $order = new Order();
         $order->setCustomer($this->getUser());
-        $order->setStatus('En cours');
+        $order->setStatus('Payée');
         $order->setCreatedAt(new \DateTime());
+        $order->setIdTransaction((string)$data['transaction_id']);
 
         $total = 0;
 
         foreach ($data['items'] as $item) {
-            if (!isset($item['product'], $item['quantity'])) {
+            if (!isset($item['id'], $item['quantity'])) {
                 return $this->json(['error' => 'Format incorrect'], 400);
             }
 
@@ -44,7 +45,7 @@ class OrderController extends AbstractController
                 return $this->json(['error' => 'Quantité invalide'], 400);
             }
 
-            $product = $em->getRepository(Product::class)->find($item['product']);
+            $product = $em->getRepository(Product::class)->find($item['id']);
 
             if (!$product) {
                 return $this->json(['error' => 'Produit non trouvé'], 404);
@@ -68,6 +69,7 @@ class OrderController extends AbstractController
 
         return $this->json([
             'message' => 'Commande créée',
+            'transaction_id' => $order->getIdTransaction(),
             'total' => $total
         ], 201);
     }
@@ -80,7 +82,7 @@ class OrderController extends AbstractController
     public function myOrders(EntityManagerInterface $em): JsonResponse
     {
         $orders = $em->getRepository(Order::class)
-            ->findBy(['customer' => $this->getUser()]);
+            ->findBy(['customer' => $this->getUser()], ['id' => 'DESC']);
 
         $data = [];
         foreach ($orders as $order) {
@@ -98,6 +100,7 @@ class OrderController extends AbstractController
                 'id' => $order->getId(),
                 'status' => $order->getStatus(),
                 'totalPrice' => $order->getTotalPrice(),
+                'transaction_id' => $order->getIdTransaction(),
                 'createdAt' => $order->getCreatedAt()->format('Y-m-d H:i:s'),
                 'items' => $items,
             ];
@@ -133,6 +136,7 @@ class OrderController extends AbstractController
                 'id' => $order->getId(),
                 'status' => $order->getStatus(),
                 'totalPrice' => $order->getTotalPrice(),
+                'transaction_id' => $order->getIdTransaction(),
                 'createdAt' => $order->getCreatedAt()->format('Y-m-d H:i:s'),
                 'customer' => [
                     'id' => $customer->getId(),

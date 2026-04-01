@@ -28,6 +28,10 @@ class Order
     #[Groups(['order:read'])]
     private ?float $totalPrice = null;
 
+    #[ORM\Column(type: 'string', length: 255, nullable:true)]
+    #[Groups(['order:read'])]
+    private ?string $idTransaction = null;
+
     #[ORM\Column]
     #[Groups(['order:read'])]
     private ?\DateTime $createdAt = null;
@@ -93,6 +97,18 @@ class Order
     public function setCreatedAt(\DateTime $createdAt): static
     {
         $this->createdAt = $createdAt;
+
+        return $this;
+    }
+
+    public function getIdTransaction(): ?string
+    {
+        return $this->idTransaction;
+    }
+
+    public function setIdTransaction(string $idTransaction): static
+    {
+        $this->idTransaction = $idTransaction;
 
         return $this;
     }
