@@ -5,30 +5,35 @@ namespace App\Controller\Api;
 use App\Entity\Product;
 use App\Entity\Category;
 use App\Repository\ProductRepository;
+use Cloudinary\Cloudinary;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Security\Http\Attribute\IsGranted;
-use Symfony\Component\HttpFoundation\File\Exception\FileException;
-use Symfony\Component\String\Slugger\SluggerInterface;
 
 #[Route('/api/products')]
 class ProductController extends AbstractController
 {
-    private const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2MB
-    private const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+    private Cloudinary $cloudinary;
 
-    // ============================
-    // Liste tous les produits + filtres
-    // ============================
+    public function __construct()
+    {
+        $this->cloudinary = new Cloudinary([
+            'cloud' => [
+                'cloud_name' => $_ENV['CLOUDINARY_CLOUD_NAME'],
+                'api_key'    => $_ENV['CLOUDINARY_API_KEY'],
+                'api_secret' => $_ENV['CLOUDINARY_API_SECRET'],
+            ]
+        ]);
+    }
+
     #[Route('', methods: ['GET'])]
     public function index(Request $request, ProductRepository $repo): JsonResponse
     {
         $categoryId = $request->query->get('category');
         $search = $request->query->get('search');
-
         $products = $repo->findByFilters($categoryId, $search);
 
         $data = [];
@@ -39,28 +44,20 @@ class ProductController extends AbstractController
         return $this->json($data);
     }
 
-    // ============================
-    // Détail produit
-    // ============================
     #[Route('/{id}', methods: ['GET'])]
     public function show(Product $product): JsonResponse
     {
         return $this->json($this->serializeProduct($product));
     }
 
-    // ============================
-    // Création produit (ADMIN)
-    // ============================
     #[IsGranted('ROLE_ADMIN')]
     #[Route('', methods: ['POST'])]
     public function create(
         Request $request,
-        EntityManagerInterface $em,
-        SluggerInterface $slugger
+        EntityManagerInterface $em
     ): JsonResponse {
-
-        $name = $request->request->get('name');
-        $price = $request->request->get('price');
+        $name        = $request->request->get('name');
+        $price       = $request->request->get('price');
         $description = $request->request->get('description');
         $categorieId = $request->request->get('categorie_id');
 
@@ -81,11 +78,9 @@ class ProductController extends AbstractController
 
         $imageFile = $request->files->get('image');
         if ($imageFile) {
-            $upload = $this->handleImageUpload($imageFile, $slugger);
-            if ($upload instanceof JsonResponse) {
-                return $upload;
-            }
-            $product->setImage($upload);
+            $imageUrl = $this->uploadToCloudinary($imageFile);
+            if ($imageUrl instanceof JsonResponse) return $imageUrl;
+            $product->setImage($imageUrl);
         }
 
         $em->persist($product);
@@ -97,25 +92,20 @@ class ProductController extends AbstractController
         ], 201);
     }
 
-    // ============================
-    // Modifier produit (ADMIN)
-    // ============================
     #[IsGranted('ROLE_ADMIN')]
     #[Route('/{id}', methods: ['POST'])]
     public function update(
         Product $product,
         Request $request,
-        EntityManagerInterface $em,
-        SluggerInterface $slugger
+        EntityManagerInterface $em
     ): JsonResponse {
-
-        $name = $request->request->get('name');
-        $price = $request->request->get('price');
+        $name        = $request->request->get('name');
+        $price       = $request->request->get('price');
         $description = $request->request->get('description');
         $categorieId = $request->request->get('categorie_id');
 
-        if ($name) $product->setName($name);
-        if ($price) $product->setPrice($price);
+        if ($name)        $product->setName($name);
+        if ($price)       $product->setPrice($price);
         if ($description) $product->setDescription($description);
 
         if ($categorieId) {
@@ -128,14 +118,9 @@ class ProductController extends AbstractController
 
         $imageFile = $request->files->get('image');
         if ($imageFile) {
-            if ($product->getImage()) {
-                $oldPath = $this->getParameter('kernel.project_dir') . '/public/uploads/' . $product->getImage();
-                if (file_exists($oldPath)) unlink($oldPath);
-            }
-
-            $upload = $this->handleImageUpload($imageFile, $slugger);
-            if ($upload instanceof JsonResponse) return $upload;
-            $product->setImage($upload);
+            $imageUrl = $this->uploadToCloudinary($imageFile);
+            if ($imageUrl instanceof JsonResponse) return $imageUrl;
+            $product->setImage($imageUrl);
         }
 
         $em->flush();
@@ -146,65 +131,52 @@ class ProductController extends AbstractController
         ]);
     }
 
-    // ============================
-    // Supprimer produit (ADMIN)
-    // ============================
     #[IsGranted('ROLE_ADMIN')]
     #[Route('/{id}', methods: ['DELETE'])]
     public function delete(Product $product, EntityManagerInterface $em): JsonResponse
     {
-        if ($product->getImage()) {
-            $path = $this->getParameter('kernel.project_dir') . '/public/uploads/' . $product->getImage();
-            if (file_exists($path)) unlink($path);
-        }
-
         $em->remove($product);
         $em->flush();
 
         return $this->json(['message' => 'Produit supprimé']);
     }
 
-    // ============================
-    // Méthodes privées
-    // ============================
-
     private function serializeProduct(Product $product): array
     {
-        $baseUrl = $this->getParameter('app.base_url');
-
         return [
-            'id' => $product->getId(),
-            'name' => $product->getName(),
-            'price' => $product->getPrice(),
+            'id'          => $product->getId(),
+            'name'        => $product->getName(),
+            'price'       => $product->getPrice(),
             'description' => $product->getDescription(),
-            'image' => $product->getImage() ? $baseUrl . '/uploads/' . $product->getImage() : null,
-            'categorie' => $product->getCategorie() ? [
-                'id' => $product->getCategorie()->getId(),
+            'image'       => $product->getImage(),
+            'categorie'   => $product->getCategorie() ? [
+                'id'   => $product->getCategorie()->getId(),
                 'name' => $product->getCategorie()->getName(),
             ] : null,
         ];
     }
 
-    private function handleImageUpload($imageFile, SluggerInterface $slugger)
+    private function uploadToCloudinary($imageFile): string|JsonResponse
     {
-        if ($imageFile->getSize() > self::MAX_FILE_SIZE) {
+        $allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
+        $maxSize = 2 * 1024 * 1024; // 2MB
+
+        if ($imageFile->getSize() > $maxSize) {
             return $this->json(['error' => 'Image trop grande (max 2MB)'], 400);
         }
 
-        if (!in_array($imageFile->getMimeType(), self::ALLOWED_TYPES)) {
+        if (!in_array($imageFile->getMimeType(), $allowedTypes)) {
             return $this->json(['error' => 'Type de fichier interdit'], 400);
         }
 
-        $originalFilename = pathinfo($imageFile->getClientOriginalName(), PATHINFO_FILENAME);
-        $safeFilename = $slugger->slug($originalFilename);
-        $newFilename = $safeFilename . '-' . uniqid() . '.' . $imageFile->guessExtension();
-
         try {
-            $imageFile->move($this->getParameter('kernel.project_dir') . '/public/uploads', $newFilename);
-        } catch (FileException $e) {
-            return $this->json(['error' => 'Erreur upload'], 500);
+            $result = $this->cloudinary->uploadApi()->upload(
+                $imageFile->getPathname(),
+                ['folder' => 'shop_backend']
+            );
+            return $result['secure_url'];
+        } catch (\Exception $e) {
+            return $this->json(['error' => 'Erreur upload Cloudinary : ' . $e->getMessage()], 500);
         }
-
-        return $newFilename;
     }
 }
