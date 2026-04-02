@@ -11,6 +11,32 @@ use Symfony\Component\Routing\Attribute\Route;
 
 class TempAdminController extends AbstractController
 {
+    #[Route('/api/temp-create-roles', methods: ['GET'])]
+    public function createRoles(EntityManagerInterface $em): JsonResponse
+    {
+        $rolesData = [
+            ['name' => 'ROLE_ADMIN', 'description' => 'Administrateur'],
+            ['name' => 'ROLE_MANAGER', 'description' => 'Manager'],
+            ['name' => 'ROLE_USER', 'description' => 'Utilisateur'],
+        ];
+
+        $created = [];
+        foreach ($rolesData as $roleData) {
+            $existing = $em->getRepository(Role::class)->findOneBy(['name' => $roleData['name']]);
+            if (!$existing) {
+                $role = new Role();
+                $role->setName($roleData['name']);
+                $role->setDescription($roleData['description']);
+                $em->persist($role);
+                $created[] = $roleData['name'];
+            }
+        }
+
+        $em->flush();
+
+        return $this->json(['message' => 'Rôles créés', 'created' => $created]);
+    }
+
     #[Route('/api/temp-promote/{email}', methods: ['GET'])]
     public function promote(
         string $email,
@@ -22,7 +48,6 @@ class TempAdminController extends AbstractController
             return $this->json(['error' => 'Utilisateur introuvable'], 404);
         }
 
-        // Chercher les rôles ROLE_ADMIN et ROLE_MANAGER
         $roleAdmin = $em->getRepository(Role::class)->findOneBy(['name' => 'ROLE_ADMIN']);
         $roleManager = $em->getRepository(Role::class)->findOneBy(['name' => 'ROLE_MANAGER']);
 
