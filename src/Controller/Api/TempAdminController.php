@@ -2,6 +2,7 @@
 
 namespace App\Controller\Api;
 
+use App\Entity\Role;
 use App\Entity\User;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -21,9 +22,24 @@ class TempAdminController extends AbstractController
             return $this->json(['error' => 'Utilisateur introuvable'], 404);
         }
 
-        $user->setRoles(['ROLE_ADMIN', 'ROLE_MANAGER', 'ROLE_USER']);
+        // Chercher les rôles ROLE_ADMIN et ROLE_MANAGER
+        $roleAdmin = $em->getRepository(Role::class)->findOneBy(['name' => 'ROLE_ADMIN']);
+        $roleManager = $em->getRepository(Role::class)->findOneBy(['name' => 'ROLE_MANAGER']);
+
+        if ($roleAdmin) {
+            $user->addUserRole($roleAdmin);
+        }
+        if ($roleManager) {
+            $user->addUserRole($roleManager);
+        }
+
         $em->flush();
 
-        return $this->json(['message' => "✅ {$email} est maintenant admin !"]);
+        $roles = array_map(fn($r) => $r->getName(), $user->getUserRoles()->toArray());
+
+        return $this->json([
+            'message' => "✅ {$email} promu admin !",
+            'roles' => $roles
+        ]);
     }
 }
