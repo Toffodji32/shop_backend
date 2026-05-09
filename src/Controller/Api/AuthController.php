@@ -3,6 +3,7 @@
 namespace App\Controller\Api;
 
 use App\Entity\User;
+use App\Repository\RoleRepository;
 use Doctrine\ORM\EntityManagerInterface;
 use Lexik\Bundle\JWTAuthenticationBundle\Services\JWTTokenManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -11,6 +12,7 @@ use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\PasswordHasher\Hasher\UserPasswordHasherInterface;
 use Symfony\Component\Security\Http\Attribute\CurrentUser;
 use Symfony\Component\Routing\Attribute\Route;
+use Psr\Log\LoggerInterface;
 
 #[Route('/api')]
 class AuthController extends AbstractController
@@ -18,31 +20,37 @@ class AuthController extends AbstractController
     private EntityManagerInterface $em;
     private UserPasswordHasherInterface $hasher;
     private JWTTokenManagerInterface $jwtManager;
+    private RoleRepository $roleRepo;
 
     public function __construct(
         EntityManagerInterface $em,
         UserPasswordHasherInterface $hasher,
-        JWTTokenManagerInterface $jwtManager
+        JWTTokenManagerInterface $jwtManager,
+        RoleRepository $roleRepo
     ) {
         $this->em = $em;
         $this->hasher = $hasher;
         $this->jwtManager = $jwtManager;
+        $this->roleRepo = $roleRepo;
     }
 
     // =========================
     // REGISTER
     // =========================
     #[Route('/register', name: 'api_register', methods: ['POST'])]
-    public function register(Request $request): JsonResponse
+    public function register(Request $request, LoggerInterface $logger): JsonResponse
     {
         $data = json_decode($request->getContent(), true);
+        $logger->info('Données reçues:', $data);
 
         if (!isset($data['email'], $data['password'], $data['name'])) {
             return new JsonResponse(['error' => 'Email, nom et mot de passe requis'], 400);
         }
 
         // Vérifie si email existe
-        $existingUser = $this->em->getRepository(User::class)->findOneBy(['email' => $data['email']]);
+        $existingUser = $this->em->getRepository(User::class)
+            ->findOneBy(['email' => $data['email']]);
+
         if ($existingUser) {
             return new JsonResponse(['error' => 'Email déjà utilisé'], 400);
         }
@@ -50,8 +58,18 @@ class AuthController extends AbstractController
         $user = new User();
         $user->setEmail($data['email']);
         $user->setName($data['name']);
-        $user->setRoles(['ROLE_USER']);
-        $user->setPassword($this->hasher->hashPassword($user, $data['password']));
+        $user->setPassword(
+            $this->hasher->hashPassword($user, $data['password'])
+        );
+
+        // 🔥 AJOUT DU ROLE (ManyToMany)
+        $roleUser = $this->roleRepo->findOneBy(['name' => 'ROLE_USER']);
+
+        if (!$roleUser) {
+            return new JsonResponse(['error' => 'Role ROLE_USER introuvable'], 500);
+        }
+
+        $user->addUserRole($roleUser);
 
         $this->em->persist($user);
         $this->em->flush();
@@ -71,7 +89,8 @@ class AuthController extends AbstractController
             return new JsonResponse(['error' => 'Email et mot de passe requis'], 400);
         }
 
-        $user = $this->em->getRepository(User::class)->findOneBy(['email' => $data['email']]);
+        $user = $this->em->getRepository(User::class)
+            ->findOneBy(['email' => $data['email']]);
 
         if (!$user || !$this->hasher->isPasswordValid($user, $data['password'])) {
             return new JsonResponse(['error' => 'Email ou mot de passe incorrect'], 401);
@@ -109,7 +128,7 @@ class AuthController extends AbstractController
     }
 
     // =========================
-    // 🔥 SETTINGS (UPDATE USER)
+    // UPDATE USER
     // =========================
     #[Route('/me', name: 'api_update_me', methods: ['PUT'])]
     public function updateMe(
@@ -122,12 +141,12 @@ class AuthController extends AbstractController
 
         $data = json_decode($request->getContent(), true);
 
-        // 🔹 Modifier nom
+        // Modifier nom
         if (!empty($data['name'])) {
             $user->setName($data['name']);
         }
 
-        // 🔹 Modifier email
+        // Modifier email
         if (!empty($data['email'])) {
 
             $existingUser = $this->em->getRepository(User::class)
@@ -140,7 +159,7 @@ class AuthController extends AbstractController
             $user->setEmail($data['email']);
         }
 
-        // 🔐 Modifier mot de passe sécurisé
+        // Modifier mot de passe
         if (!empty($data['oldPassword']) && !empty($data['password'])) {
 
             if (!$this->hasher->isPasswordValid($user, $data['oldPassword'])) {
@@ -163,7 +182,8 @@ class AuthController extends AbstractController
             'user' => [
                 'id' => $user->getId(),
                 'email' => $user->getEmail(),
-                'name' => $user->getName()
+                'name' => $user->getName(),
+                'roles' => $user->getRoles()
             ]
         ]);
     }

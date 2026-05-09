@@ -5,17 +5,29 @@ namespace App\DataFixtures;
 use App\Entity\User;
 use App\Entity\Category;
 use App\Entity\Product;
+use App\Repository\RoleRepository;
 use Doctrine\Bundle\FixturesBundle\Fixture;
 use Doctrine\Persistence\ObjectManager;
 use Symfony\Component\PasswordHasher\Hasher\UserPasswordHasherInterface;
+use Doctrine\Common\DataFixtures\DependentFixtureInterface;
 
-class AppFixtures extends Fixture
+class AppFixtures extends Fixture implements DependentFixtureInterface
 {
-    private UserPasswordHasherInterface $hasher;
 
-    public function __construct(UserPasswordHasherInterface $hasher)
+    private UserPasswordHasherInterface $hasher;
+    private RoleRepository $roleRepo;
+
+    public function __construct(UserPasswordHasherInterface $hasher, RoleRepository $roleRepo)
     {
         $this->hasher = $hasher;
+        $this->roleRepo = $roleRepo;
+    }
+
+    public function getDependencies(): array
+    {
+        return [
+            RoleFixtures::class,
+        ];
     }
 
     public function load(ObjectManager $manager): void
@@ -23,23 +35,25 @@ class AppFixtures extends Fixture
         // ===== USERS =====
 
         // ADMIN
+        $adminRole = $this->roleRepo->findOneBy(['name' => 'ROLE_ADMIN']);
         $admin = new User();
         $admin->setEmail('admin@test.com');
         $admin->setName('Admin User');
-        $admin->setRoles(['ROLE_ADMIN']);
         $admin->setPassword(
             $this->hasher->hashPassword($admin, 'admin123')
         );
+        $admin->addUserRole($adminRole);
         $manager->persist($admin);
 
         // CLIENT
+        $userRole = $this->roleRepo->findOneBy(['name' => 'ROLE_USER']);
         $client = new User();
         $client->setEmail('client@test.com');
         $client->setName('Client User');
-        $client->setRoles(['ROLE_CLIENT']);
         $client->setPassword(
             $this->hasher->hashPassword($client, 'client123')
         );
+        $client->addUserRole($userRole);
         $manager->persist($client);
 
 
