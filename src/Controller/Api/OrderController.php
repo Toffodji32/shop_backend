@@ -30,7 +30,7 @@ class OrderController extends AbstractController
 
         $order = new Order();
         $order->setCustomer($this->getUser());
-        $order->setStatus('Payée');
+        $order->setStatus('En cours');
         $order->setCreatedAt(new \DateTime());
         $order->setIdTransaction((string)$data['transaction_id']);
 
